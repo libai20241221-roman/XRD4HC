@@ -16,6 +16,8 @@ class PeakResult:
     fwhm_deg: float
     area: float
     height: float
+    r2: float
+    rmse: float
 
 
 @dataclass
@@ -70,7 +72,12 @@ def fit_peak(two_theta: np.ndarray, intensity: np.ndarray, fit_range: Tuple[floa
     y_bg = bg0 + bg1 * x
     area = float(np.trapz(y_fit - y_bg, x))
 
-    return PeakResult(two_theta=float(cen), fwhm_deg=float(abs(fwhm)), area=area, height=float(amp))
+    ss_res = float(np.sum((y - y_fit) ** 2))
+    ss_tot = float(np.sum((y - np.mean(y)) ** 2)) + 1e-12
+    r2 = 1.0 - ss_res / ss_tot
+    rmse = float(np.sqrt(np.mean((y - y_fit) ** 2)))
+
+    return PeakResult(two_theta=float(cen), fwhm_deg=float(abs(fwhm)), area=area, height=float(amp), r2=r2, rmse=rmse)
 
 
 def _rolling_min_baseline(y: np.ndarray, window: int = 51) -> np.ndarray:
