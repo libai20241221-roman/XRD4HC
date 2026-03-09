@@ -49,6 +49,16 @@ with st.sidebar:
     asls_lam = st.number_input("AsLS λ", min_value=1e2, max_value=1e8, value=1e5, format="%.0f")
     asls_p = st.number_input("AsLS p", min_value=0.0001, max_value=0.5, value=0.01, format="%.4f")
 
+    with st.expander("📘 背景处理原理与教程", expanded=False):
+        st.markdown("""
+- percentile: constant low-percentile baseline for flat background.  
+- rolling_min: moving minimum baseline for slowly varying background.  
+- poly: polynomial trend baseline for curved background.  
+- asls: Asymmetric Least Squares, robust for complex broad background.  
+
+Recommended flow: `percentile` → `rolling_min/poly` → `asls` if needed.
+""")
+
 uploaded_files = st.file_uploader("上传文件（可多选）", type=["csv", "txt", "dat", "xlsx", "xls"], accept_multiple_files=True)
 
 if uploaded_files:
@@ -66,27 +76,17 @@ if uploaded_files:
             st.markdown("### 单文件独立调整")
             use_override = st.checkbox("启用该文件独立参数", key=f"ov_{up.name}")
 
-            ana_min_default, ana_max_default = float(two_theta.min()), float(two_theta.max())
-            ana_range = st.slider(
-                f"分析X范围 [{up.name}]",
-                min_value=ana_min_default,
-                max_value=ana_max_default,
-                value=(ana_min_default, ana_max_default),
-                step=0.1,
-                key=f"ana_{up.name}",
-            )
-            disp_range = st.slider(
-                f"显示X范围 [{up.name}]",
-                min_value=ana_min_default,
-                max_value=ana_max_default,
-                value=(ana_min_default, ana_max_default),
-                step=0.1,
-                key=f"disp_{up.name}",
-            )
+            x_min_default, x_max_default = float(two_theta.min()), float(two_theta.max())
+            cxa, cxb = st.columns(2)
+            with cxa:
+                x_left = st.number_input(f"X范围左边界 (°2θ) [{up.name}]", value=x_min_default, format="%.2f", key=f"xleft_{up.name}")
+            with cxb:
+                x_right = st.number_input(f"X范围右边界 (°2θ) [{up.name}]", value=x_max_default, format="%.2f", key=f"xright_{up.name}")
+            x_range = (float(min(x_left, x_right)), float(max(x_left, x_right)))
 
             tt = two_theta
             yy = intensity
-            m_ana = (tt >= ana_range[0]) & (tt <= ana_range[1])
+            m_ana = (tt >= x_range[0]) & (tt <= x_range[1])
             tt_ana, yy_ana = tt[m_ana], yy[m_ana]
             if len(tt_ana) < 20:
                 st.warning("分析范围内数据点太少，请扩大范围。")
@@ -143,13 +143,13 @@ if uploaded_files:
             }), use_container_width=True)
 
             y_proc = preprocess_intensity(yy_ana, smooth=sm, window=sgw, polyorder=sgp, baseline_mode=bmode, smooth_mode=("none" if not sm else sm_mode), ma_window=maw, baseline_poly_degree=pdg, asls_lam=alam, asls_p=ap)
-            m_disp = (tt_ana >= disp_range[0]) & (tt_ana <= disp_range[1])
+            m_disp = (tt_ana >= x_range[0]) & (tt_ana <= x_range[1])
             fig, ax = plt.subplots(figsize=(10, 4.8))
             ax.plot(tt_ana[m_disp], yy_ana[m_disp], lw=0.8, alpha=0.45, label="Raw")
             ax.plot(tt_ana[m_disp], y_proc[m_disp], lw=1.3, label="Processed")
             ax.axvline(res.peak_002.two_theta, color="tab:red", ls="--", label="(002) center")
             ax.axvline(res.peak_100.two_theta, color="tab:green", ls="--", label="(100) center")
-            ax.set_xlim(disp_range)
+            ax.set_xlim(x_range)
             ax.legend(ncol=2)
             ax.grid(alpha=0.2)
             st.pyplot(fig)
@@ -162,8 +162,7 @@ if uploaded_files:
                 "Fit Grade": quality,
                 "R² (002)": p002_r2,
                 "R² (100)": p100_r2,
-                "Analysis X range (°2θ)": f"{ana_range[0]:.1f}-{ana_range[1]:.1f}",
-                "Display X range (°2θ)": f"{disp_range[0]:.1f}-{disp_range[1]:.1f}",
+                "X range (°2θ)": f"{x_range[0]:.1f}-{x_range[1]:.1f}",
             })
 
     if rows:
