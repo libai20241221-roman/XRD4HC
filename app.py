@@ -21,7 +21,11 @@ with st.sidebar:
 
     st.header("平滑设置")
     smooth = st.checkbox("启用平滑", value=True)
-    smooth_mode = st.selectbox("平滑模式", ["savgol", "moving_average", "none"], format_func=lambda x: {"savgol": "Savitzky-Golay", "moving_average": "移动平均", "none": "不平滑"}[x])
+    smooth_mode = st.selectbox(
+        "平滑模式",
+        ["savgol", "moving_average", "none"],
+        format_func=lambda x: {"savgol": "Savitzky-Golay", "moving_average": "移动平均", "none": "不平滑"}[x],
+    )
     sg_window = st.number_input("S-G窗口(奇数)", min_value=5, max_value=101, value=11, step=2)
     sg_poly = st.number_input("S-G多项式阶数", min_value=1, max_value=7, value=3)
     ma_window = st.number_input("移动平均窗口", min_value=3, max_value=101, value=7)
@@ -42,6 +46,23 @@ with st.sidebar:
     asls_lam = st.number_input("AsLS λ", min_value=1e2, max_value=1e8, value=1e5, format="%.0f")
     asls_p = st.number_input("AsLS p", min_value=0.0001, max_value=0.5, value=0.01, format="%.4f")
 
+    with st.expander("📘 背景处理原理与教程", expanded=False):
+        st.markdown(
+            """
+- **percentile**：用低分位值作为常数背景，适合基线较平的谱线。  
+- **rolling_min**：滑动窗口取最小值估计背景，适合缓慢变化背景。  
+- **poly**：用低阶多项式拟合全局背景，适合近似抛物线/趋势背景。  
+- **asls**：Asymmetric Least Squares，常用于拉曼/XRD基线校正，对宽背景较稳健。  
+
+**建议流程（小白版）**  
+1) 先用 `percentile` + `savgol` 快速看结果；  
+2) 若峰底明显倾斜，再试 `rolling_min` 或 `poly`；  
+3) 背景复杂时改用 `asls`，逐步调 `λ` 与 `p`。  
+
+你也可以在同一文件反复切换模式，对比峰位与 d002 是否稳定。
+"""
+        )
+
 uploaded_files = st.file_uploader(
     "上传CSV/TXT/Excel（可多文件）",
     type=["csv", "txt", "dat", "xlsx", "xls"],
@@ -50,7 +71,7 @@ uploaded_files = st.file_uploader(
 
 if uploaded_files:
     results_rows = []
-    tabs = st.tabs([f"文件{i+1}: {f.name}" for i, f in enumerate(uploaded_files)])
+    tabs = st.tabs([f"File {i+1}: {f.name}" for i, f in enumerate(uploaded_files)])
 
     for tab, up in zip(tabs, uploaded_files):
         with tab:
@@ -82,11 +103,27 @@ if uploaded_files:
                 st.subheader("手动设置峰拟合区间")
                 c1, c2 = st.columns(2)
                 with c1:
-                    r002_l = st.number_input(f"(002) 左边界 [{up.name}]", value=20.0, format="%.2f", key=f"r002l_{up.name}")
-                    r002_r = st.number_input(f"(002) 右边界 [{up.name}]", value=32.0, format="%.2f", key=f"r002r_{up.name}")
+                    slider_002 = st.slider(
+                        f"(002) 区间拖拽 [{up.name}]",
+                        min_value=10.0,
+                        max_value=40.0,
+                        value=(20.0, 32.0),
+                        step=0.1,
+                        key=f"slider002_{up.name}",
+                    )
+                    r002_l = st.number_input(f"(002) 左边界键入 [{up.name}]", value=float(slider_002[0]), format="%.2f", key=f"r002l_{up.name}")
+                    r002_r = st.number_input(f"(002) 右边界键入 [{up.name}]", value=float(slider_002[1]), format="%.2f", key=f"r002r_{up.name}")
                 with c2:
-                    r100_l = st.number_input(f"(100) 左边界 [{up.name}]", value=38.0, format="%.2f", key=f"r100l_{up.name}")
-                    r100_r = st.number_input(f"(100) 右边界 [{up.name}]", value=52.0, format="%.2f", key=f"r100r_{up.name}")
+                    slider_100 = st.slider(
+                        f"(100) 区间拖拽 [{up.name}]",
+                        min_value=30.0,
+                        max_value=60.0,
+                        value=(38.0, 52.0),
+                        step=0.1,
+                        key=f"slider100_{up.name}",
+                    )
+                    r100_l = st.number_input(f"(100) 左边界键入 [{up.name}]", value=float(slider_100[0]), format="%.2f", key=f"r100l_{up.name}")
+                    r100_r = st.number_input(f"(100) 右边界键入 [{up.name}]", value=float(slider_100[1]), format="%.2f", key=f"r100r_{up.name}")
                 range_002 = (float(r002_l), float(r002_r))
                 range_100 = (float(r100_l), float(r100_r))
 
@@ -121,11 +158,11 @@ if uploaded_files:
                 st.dataframe(
                     pd.DataFrame(
                         {
-                            "峰": ["(002)", "(100)"],
-                            "区间(°2θ)": [f"{range_002[0]:.2f}-{range_002[1]:.2f}", f"{range_100[0]:.2f}-{range_100[1]:.2f}"],
-                            "2θ中心(°)": [result.peak_002.two_theta, result.peak_100.two_theta],
-                            "FWHM(°2θ)": [result.peak_002.fwhm_deg, result.peak_100.fwhm_deg],
-                            "积分面积": [result.peak_002.area, result.peak_100.area],
+                            "Peak": ["(002)", "(100)"],
+                            "Range (°2θ)": [f"{range_002[0]:.2f}-{range_002[1]:.2f}", f"{range_100[0]:.2f}-{range_100[1]:.2f}"],
+                            "Center 2θ (°)": [result.peak_002.two_theta, result.peak_100.two_theta],
+                            "FWHM (°2θ)": [result.peak_002.fwhm_deg, result.peak_100.fwhm_deg],
+                            "Area (a.u.)": [result.peak_002.area, result.peak_100.area],
                         }
                     ),
                     use_container_width=True,
@@ -144,12 +181,12 @@ if uploaded_files:
                 asls_p=float(asls_p),
             )
             fig, ax = plt.subplots(figsize=(10, 4.8))
-            ax.plot(two_theta, intensity, lw=0.8, alpha=0.45, label="原始谱线")
-            ax.plot(two_theta, y_proc, lw=1.3, label="处理后谱线")
-            ax.axvspan(range_002[0], range_002[1], alpha=0.08, color="tab:red", label="(002)拟合区间")
-            ax.axvspan(range_100[0], range_100[1], alpha=0.08, color="tab:green", label="(100)拟合区间")
-            ax.axvline(result.peak_002.two_theta, color="tab:red", ls="--", label="(002)中心")
-            ax.axvline(result.peak_100.two_theta, color="tab:green", ls="--", label="(100)中心")
+            ax.plot(two_theta, intensity, lw=0.8, alpha=0.45, label="Raw pattern")
+            ax.plot(two_theta, y_proc, lw=1.3, label="Processed pattern")
+            ax.axvspan(range_002[0], range_002[1], alpha=0.08, color="tab:red", label="(002) fit range")
+            ax.axvspan(range_100[0], range_100[1], alpha=0.08, color="tab:green", label="(100) fit range")
+            ax.axvline(result.peak_002.two_theta, color="tab:red", ls="--", label="(002) center")
+            ax.axvline(result.peak_100.two_theta, color="tab:green", ls="--", label="(100) center")
             ax.set_xlabel("2θ (degree)")
             ax.set_ylabel("Intensity (a.u.)")
             ax.legend(ncol=2)
@@ -158,16 +195,16 @@ if uploaded_files:
 
             results_rows.append(
                 {
-                    "file": up.name,
-                    "d002_nm": result.d002_nm,
-                    "Lc_nm": result.lc_nm,
-                    "La_nm": result.la_nm,
-                    "fit_range_002": f"{range_002[0]:.2f}-{range_002[1]:.2f}",
-                    "fit_range_100": f"{range_100[0]:.2f}-{range_100[1]:.2f}",
-                    "smooth_mode": ("none" if not smooth else smooth_mode),
-                    "baseline_mode": baseline_mode,
-                    "peak002_2theta_deg": result.peak_002.two_theta,
-                    "peak100_2theta_deg": result.peak_100.two_theta,
+                    "File": up.name,
+                    "d002 (nm)": result.d002_nm,
+                    "Lc (nm)": result.lc_nm,
+                    "La (nm)": result.la_nm,
+                    "Range (002) (°2θ)": f"{range_002[0]:.2f}-{range_002[1]:.2f}",
+                    "Range (100) (°2θ)": f"{range_100[0]:.2f}-{range_100[1]:.2f}",
+                    "Smoothing mode": ("none" if not smooth else smooth_mode),
+                    "Baseline mode": baseline_mode,
+                    "Peak (002) center 2θ (°)": result.peak_002.two_theta,
+                    "Peak (100) center 2θ (°)": result.peak_100.two_theta,
                 }
             )
 
