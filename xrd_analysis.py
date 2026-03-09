@@ -4,8 +4,10 @@ from dataclasses import dataclass
 from typing import Tuple
 
 import numpy as np
+from scipy import sparse
 from scipy.optimize import curve_fit
 from scipy.signal import savgol_filter
+from scipy.sparse.linalg import spsolve
 
 
 @dataclass
@@ -83,23 +85,59 @@ def _rolling_min_baseline(y: np.ndarray, window: int = 51) -> np.ndarray:
     return baseline
 
 
+def _poly_baseline(y: np.ndarray, degree: int = 2) -> np.ndarray:
+    x = np.arange(len(y), dtype=float)
+    deg = min(max(1, degree), 5)
+    coef = np.polyfit(x, y, deg=deg)
+    return np.polyval(coef, x)
+
+
+def _asls_baseline(y: np.ndarray, lam: float = 1e5, p: float = 0.01, niter: int = 10) -> np.ndarray:
+    L = len(y)
+    D = sparse.diags([1, -2, 1], [0, -1, -2], shape=(L, L - 2))
+    w = np.ones(L)
+    for _ in range(niter):
+        W = sparse.spdiags(w, 0, L, L)
+        Z = W + lam * D.dot(D.transpose())
+        z = spsolve(Z, w * y)
+        w = p * (y > z) + (1 - p) * (y < z)
+    return z
+
+
 def preprocess_intensity(
     intensity: np.ndarray,
     smooth: bool = True,
     window: int = 11,
     polyorder: int = 3,
     baseline_mode: str = "percentile",
+    smooth_mode: str = "savgol",
+    ma_window: int = 7,
+    baseline_poly_degree: int = 2,
+    asls_lam: float = 1e5,
+    asls_p: float = 0.01,
 ) -> np.ndarray:
     y = np.asarray(intensity, dtype=float)
-    if smooth and len(y) >= window and window % 2 == 1:
-        y = savgol_filter(y, window_length=window, polyorder=min(polyorder, window - 1))
+
+    if smooth:
+        if smooth_mode == "moving_average":
+            w = max(3, int(ma_window))
+            kernel = np.ones(w) / w
+            y = np.convolve(y, kernel, mode="same")
+        elif smooth_mode == "savgol" and len(y) >= window and window % 2 == 1:
+            y = savgol_filter(y, window_length=window, polyorder=min(polyorder, window - 1))
 
     if baseline_mode == "none":
         y_corr = y
     elif baseline_mode == "rolling_min":
         baseline = _rolling_min_baseline(y, window=max(31, window * 5))
         y_corr = y - baseline
-    else:  # percentile
+    elif baseline_mode == "poly":
+        baseline = _poly_baseline(y, degree=baseline_poly_degree)
+        y_corr = y - baseline
+    elif baseline_mode == "asls":
+        baseline = _asls_baseline(y, lam=asls_lam, p=asls_p)
+        y_corr = y - baseline
+    else:
         baseline = np.percentile(y, 1)
         y_corr = y - baseline
 
@@ -141,8 +179,22 @@ def analyze_hard_carbon_xrd(
     inst_fwhm_deg: float = 0.0,
     smooth: bool = True,
     baseline_mode: str = "percentile",
+    smooth_mode: str = "savgol",
+    ma_window: int = 7,
+    baseline_poly_degree: int = 2,
+    asls_lam: float = 1e5,
+    asls_p: float = 0.01,
 ) -> XRDResult:
-    y = preprocess_intensity(intensity, smooth=smooth, baseline_mode=baseline_mode)
+    y = preprocess_intensity(
+        intensity,
+        smooth=smooth,
+        baseline_mode=baseline_mode,
+        smooth_mode=smooth_mode,
+        ma_window=ma_window,
+        baseline_poly_degree=baseline_poly_degree,
+        asls_lam=asls_lam,
+        asls_p=asls_p,
+    )
 
     p002 = fit_peak(two_theta, y, range_002)
     p100 = fit_peak(two_theta, y, range_100)
