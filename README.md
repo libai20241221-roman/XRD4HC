@@ -1,0 +1,64 @@
+# 硬炭 XRD 自动分析工具（网页版 + 可打包 EXE）
+
+这个项目提供一个可直接使用的 **Streamlit 网页应用**，用于处理硬炭 XRD 数据并自动计算：
+
+- `d002`
+- `Lc`（沿 c 轴晶粒尺寸）
+- `La`（沿 a 轴晶粒尺寸）
+
+并给出 (002)/(100) 峰位与 FWHM。
+
+## 1. 快速启动（网页版）
+
+```bash
+pip install -r requirements.txt
+streamlit run app.py
+```
+
+浏览器打开后，上传数据文件即可分析，程序会自动识别 2θ 与强度列。
+
+支持格式：`.csv` / `.txt` / `.dat` / `.xlsx` / `.xls`。
+
+列识别策略：
+- 优先按列名识别（如 `2Theta`/`2θ`/`角度` 与 `Intensity`/`强度`/`Counts`）
+- 若无表头则自动从数值列中推断
+
+## 2. 计算方法
+
+- Bragg 定律：
+  - `d002 = λ / (2 sin θ002)`
+- Scherrer 方程：
+  - `Lc = Kc λ / (β002 cos θ002)`
+  - `La = Ka λ / (β100 cos θ100)`
+
+说明：
+- `β` 为峰 FWHM（弧度），可扣除仪器展宽：`β = sqrt(β_meas^2 - β_inst^2)`。
+- 默认峰拟合区间：
+  - (002): 20–32°
+  - (100): 38–52°
+- 峰形采用 pseudo-Voigt + 一次线性背景。
+
+## 3. 打包为 Windows EXE
+
+推荐使用 PyInstaller：
+
+```bash
+pip install pyinstaller
+pyinstaller --onefile --name hardcarbon_xrd app.py
+```
+
+> 说明：Streamlit 本质是本地网页服务，打包后运行 EXE 会启动本地服务并自动在浏览器打开页面。
+
+若你希望“纯桌面窗口”形式，也可后续改为 PySide6/Tkinter 前端，核心计算模块可继续复用 `xrd_analysis.py`。
+
+## 4. 运行测试
+
+```bash
+pytest -q
+```
+
+## 5. 数据建议
+
+- 2θ 范围建议覆盖 10–70°。
+- 建议步长 ≤ 0.05°。
+- 如果噪声较高，开启平滑可提高拟合稳定性。
