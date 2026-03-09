@@ -10,6 +10,14 @@ st.title("🧪 硬炭 XRD 数据分析（La / Lc / d002）")
 st.caption("支持批量上传；每个文件可独立覆盖参数、独立分析范围与显示范围。")
 
 
+def _peak_attr(peak, name: str, default: float = float("nan")) -> float:
+    v = getattr(peak, name, default)
+    try:
+        return float(v)
+    except Exception:
+        return default
+
+
 def grade_quality(r2_002: float, r2_100: float, rmse_002: float, rmse_100: float) -> str:
     avg_r2 = (r2_002 + r2_100) / 2
     avg_rmse = (rmse_002 + rmse_100) / 2
@@ -114,7 +122,11 @@ if uploaded_files:
                 st.error(f"拟合失败: {e}")
                 continue
 
-            quality = grade_quality(res.peak_002.r2, res.peak_100.r2, res.peak_002.rmse, res.peak_100.rmse)
+            p002_r2 = _peak_attr(res.peak_002, "r2")
+            p100_r2 = _peak_attr(res.peak_100, "r2")
+            p002_rmse = _peak_attr(res.peak_002, "rmse")
+            p100_rmse = _peak_attr(res.peak_100, "rmse")
+            quality = grade_quality(p002_r2, p100_r2, p002_rmse, p100_rmse)
 
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("d002 (nm)", f"{res.d002_nm:.4f}")
@@ -126,8 +138,8 @@ if uploaded_files:
                 "Peak": ["(002)", "(100)"],
                 "Center 2θ (°)": [res.peak_002.two_theta, res.peak_100.two_theta],
                 "FWHM (°2θ)": [res.peak_002.fwhm_deg, res.peak_100.fwhm_deg],
-                "R²": [res.peak_002.r2, res.peak_100.r2],
-                "RMSE": [res.peak_002.rmse, res.peak_100.rmse],
+                "R²": [p002_r2, p100_r2],
+                "RMSE": [p002_rmse, p100_rmse],
             }), use_container_width=True)
 
             y_proc = preprocess_intensity(yy_ana, smooth=sm, window=sgw, polyorder=sgp, baseline_mode=bmode, smooth_mode=("none" if not sm else sm_mode), ma_window=maw, baseline_poly_degree=pdg, asls_lam=alam, asls_p=ap)
@@ -148,8 +160,8 @@ if uploaded_files:
                 "Lc (nm)": res.lc_nm,
                 "La (nm)": res.la_nm,
                 "Fit Grade": quality,
-                "R² (002)": res.peak_002.r2,
-                "R² (100)": res.peak_100.r2,
+                "R² (002)": p002_r2,
+                "R² (100)": p100_r2,
                 "Analysis X range (°2θ)": f"{ana_range[0]:.1f}-{ana_range[1]:.1f}",
                 "Display X range (°2θ)": f"{disp_range[0]:.1f}-{disp_range[1]:.1f}",
             })
