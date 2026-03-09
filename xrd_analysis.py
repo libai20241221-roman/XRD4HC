@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Tuple
 
 import numpy as np
 from scipy.optimize import curve_fit
@@ -63,7 +63,7 @@ def fit_peak(two_theta: np.ndarray, intensity: np.ndarray, fit_range: Tuple[floa
     )
 
     popt, _ = curve_fit(pseudo_voigt, x, y, p0=p0, bounds=bounds, maxfev=30000)
-    amp, cen, fwhm, eta, bg0, bg1 = popt
+    amp, cen, fwhm, _eta, bg0, bg1 = popt
     y_fit = pseudo_voigt(x, *popt)
     y_bg = bg0 + bg1 * x
     area = float(np.trapz(y_fit - y_bg, x))
@@ -71,13 +71,39 @@ def fit_peak(two_theta: np.ndarray, intensity: np.ndarray, fit_range: Tuple[floa
     return PeakResult(two_theta=float(cen), fwhm_deg=float(abs(fwhm)), area=area, height=float(amp))
 
 
-def preprocess_intensity(intensity: np.ndarray, smooth: bool = True, window: int = 11, polyorder: int = 3) -> np.ndarray:
+def _rolling_min_baseline(y: np.ndarray, window: int = 51) -> np.ndarray:
+    w = max(5, int(window))
+    if w % 2 == 0:
+        w += 1
+    pad = w // 2
+    ypad = np.pad(y, (pad, pad), mode="edge")
+    baseline = np.empty_like(y)
+    for i in range(len(y)):
+        baseline[i] = np.min(ypad[i : i + w])
+    return baseline
+
+
+def preprocess_intensity(
+    intensity: np.ndarray,
+    smooth: bool = True,
+    window: int = 11,
+    polyorder: int = 3,
+    baseline_mode: str = "percentile",
+) -> np.ndarray:
     y = np.asarray(intensity, dtype=float)
     if smooth and len(y) >= window and window % 2 == 1:
         y = savgol_filter(y, window_length=window, polyorder=min(polyorder, window - 1))
-    baseline = np.percentile(y, 1)
-    y = y - baseline
-    return np.clip(y, a_min=0, a_max=None)
+
+    if baseline_mode == "none":
+        y_corr = y
+    elif baseline_mode == "rolling_min":
+        baseline = _rolling_min_baseline(y, window=max(31, window * 5))
+        y_corr = y - baseline
+    else:  # percentile
+        baseline = np.percentile(y, 1)
+        y_corr = y - baseline
+
+    return np.clip(y_corr, a_min=0, a_max=None)
 
 
 def scherrer_size_nm(lambda_nm: float, k: float, theta_deg: float, fwhm_deg: float, inst_fwhm_deg: float = 0.0) -> float:
@@ -85,6 +111,23 @@ def scherrer_size_nm(lambda_nm: float, k: float, theta_deg: float, fwhm_deg: flo
     beta_rad = np.deg2rad(np.sqrt(beta_deg_sq))
     theta_rad = np.deg2rad(theta_deg)
     return float((k * lambda_nm) / (beta_rad * np.cos(theta_rad)))
+
+
+def suggest_peak_ranges(two_theta: np.ndarray, intensity: np.ndarray) -> Tuple[Tuple[float, float], Tuple[float, float]]:
+    def _auto_range(default_range: Tuple[float, float], half_width: float) -> Tuple[float, float]:
+        m = (two_theta >= default_range[0]) & (two_theta <= default_range[1])
+        if m.sum() < 7:
+            return default_range
+        x = two_theta[m]
+        y = intensity[m]
+        center = float(x[int(np.argmax(y))])
+        lo = max(default_range[0], center - half_width)
+        hi = min(default_range[1], center + half_width)
+        if hi - lo < 2.0:
+            return default_range
+        return (lo, hi)
+
+    return _auto_range((20.0, 32.0), 3.5), _auto_range((38.0, 52.0), 4.0)
 
 
 def analyze_hard_carbon_xrd(
@@ -97,8 +140,9 @@ def analyze_hard_carbon_xrd(
     range_100: Tuple[float, float] = (38.0, 52.0),
     inst_fwhm_deg: float = 0.0,
     smooth: bool = True,
+    baseline_mode: str = "percentile",
 ) -> XRDResult:
-    y = preprocess_intensity(intensity, smooth=smooth)
+    y = preprocess_intensity(intensity, smooth=smooth, baseline_mode=baseline_mode)
 
     p002 = fit_peak(two_theta, y, range_002)
     p100 = fit_peak(two_theta, y, range_100)
