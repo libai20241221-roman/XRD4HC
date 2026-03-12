@@ -137,6 +137,7 @@ if uploaded_files:
             p002_rmse = _peak_attr(res.peak_002, "rmse")
             p100_rmse = _peak_attr(res.peak_100, "rmse")
             quality = grade_quality(p002_r2, p100_r2, p002_rmse, p100_rmse)
+            double_002 = getattr(res, "double_002", None)
 
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("d002 (nm)", f"{res.d002_nm:.4f}")
@@ -152,13 +153,13 @@ if uploaded_files:
                 "RMSE": [p002_rmse, p100_rmse],
             }), use_container_width=True)
 
-            if res.double_002 is not None:
+            if double_002 is not None:
                 st.markdown("#### 20–32° 双峰分解结果")
                 st.dataframe(pd.DataFrame({
                     "Component": ["Low-angle peak", "High-angle peak"],
-                    "Center 2θ (°)": [res.double_002.peak_low.two_theta, res.double_002.peak_high.two_theta],
-                    "d (nm)": [res.double_002.d_low_nm, res.double_002.d_high_nm],
-                    "Area ratio": [res.double_002.area_ratio_low, res.double_002.area_ratio_high],
+                    "Center 2θ (°)": [double_002.peak_low.two_theta, double_002.peak_high.two_theta],
+                    "d (nm)": [double_002.d_low_nm, double_002.d_high_nm],
+                    "Area ratio": [double_002.area_ratio_low, double_002.area_ratio_high],
                 }), use_container_width=True)
                 st.caption("说明：低角峰通常对应更无序/更大层间距组分，高角峰对应相对有序组分。")
 
@@ -183,9 +184,9 @@ if uploaded_files:
                 "R² (002)": p002_r2,
                 "R² (100)": p100_r2,
                 "X range (°2θ)": f"{x_range[0]:.1f}-{x_range[1]:.1f}",
-                "Double peak fitted": bool(res.double_002 is not None),
-                "d_low (nm)": (res.double_002.d_low_nm if res.double_002 is not None else float("nan")),
-                "d_high (nm)": (res.double_002.d_high_nm if res.double_002 is not None else float("nan")),
+                "Double peak fitted": bool(double_002 is not None),
+                "d_low (nm)": (double_002.d_low_nm if double_002 is not None else float("nan")),
+                "d_high (nm)": (double_002.d_high_nm if double_002 is not None else float("nan")),
             })
 
     if rows:
