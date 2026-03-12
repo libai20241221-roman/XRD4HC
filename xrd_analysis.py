@@ -10,6 +10,15 @@ from scipy.signal import savgol_filter
 from scipy.sparse.linalg import spsolve
 
 
+def _integrate_trapezoid(y: np.ndarray, x: np.ndarray) -> float:
+    if hasattr(np, "trapezoid"):
+        return float(np.trapezoid(y, x))
+    if hasattr(np, "trapz"):
+        return float(np.trapz(y, x))
+    # ultra-compat fallback
+    return float(__import__("scipy").integrate.trapezoid(y, x))
+
+
 @dataclass
 class PeakResult:
     two_theta: float
@@ -94,7 +103,7 @@ def fit_peak(two_theta: np.ndarray, intensity: np.ndarray, fit_range: Tuple[floa
     amp, cen, fwhm, _eta, bg0, bg1 = popt
     y_fit = pseudo_voigt(x, *popt)
     y_bg = bg0 + bg1 * x
-    area = float(np.trapz(y_fit - y_bg, x))
+    area = _integrate_trapezoid(y_fit - y_bg, x)
 
     ss_res = float(np.sum((y - y_fit) ** 2))
     ss_tot = float(np.sum((y - np.mean(y)) ** 2)) + 1e-12
@@ -141,8 +150,8 @@ def fit_double_peak(two_theta: np.ndarray, intensity: np.ndarray, fit_range: Tup
     y1 = _pure_pv(x, a1, c1, w1, e1)
     y2 = _pure_pv(x, a2, c2, w2, e2)
 
-    area1 = float(np.trapz(y1, x))
-    area2 = float(np.trapz(y2, x))
+    area1 = _integrate_trapezoid(y1, x)
+    area2 = _integrate_trapezoid(y2, x)
     area_sum = max(area1 + area2, 1e-12)
 
     ss_res = float(np.sum((y - y_fit) ** 2))
