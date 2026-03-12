@@ -121,7 +121,13 @@ if uploaded_files:
                 range_002, range_100 = (float(s002[0]), float(s002[1])), (float(s100[0]), float(s100[1]))
 
             try:
-                res = analyze_hard_carbon_xrd(tt_ana, yy_ana, lambda_nm=lmbd, k_lc=klc, k_la=kla, inst_fwhm_deg=ifwhm, smooth=sm, range_002=range_002, range_100=range_100, baseline_mode=bmode, smooth_mode=("none" if not sm else sm_mode), ma_window=maw, baseline_poly_degree=pdg, asls_lam=alam, asls_p=ap, enable_double_002=enable_double_002)
+                try:
+                    res = analyze_hard_carbon_xrd(tt_ana, yy_ana, lambda_nm=lmbd, k_lc=klc, k_la=kla, inst_fwhm_deg=ifwhm, smooth=sm, range_002=range_002, range_100=range_100, baseline_mode=bmode, smooth_mode=("none" if not sm else sm_mode), ma_window=maw, baseline_poly_degree=pdg, asls_lam=alam, asls_p=ap, enable_double_002=enable_double_002)
+                except TypeError as e:
+                    if "enable_double_002" not in str(e):
+                        raise
+                    # Backward compatibility for old xrd_analysis modules still loaded by Streamlit
+                    res = analyze_hard_carbon_xrd(tt_ana, yy_ana, lambda_nm=lmbd, k_lc=klc, k_la=kla, inst_fwhm_deg=ifwhm, smooth=sm, range_002=range_002, range_100=range_100, baseline_mode=bmode, smooth_mode=("none" if not sm else sm_mode), ma_window=maw, baseline_poly_degree=pdg, asls_lam=alam, asls_p=ap)
             except Exception as e:
                 st.error(f"拟合失败: {e}")
                 continue
