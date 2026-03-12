@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Tuple
+from typing import Optional, Tuple
 
 import numpy as np
 from scipy import sparse
@@ -21,12 +21,25 @@ class PeakResult:
 
 
 @dataclass
+class DoublePeakResult:
+    peak_low: PeakResult
+    peak_high: PeakResult
+    d_low_nm: float
+    d_high_nm: float
+    area_ratio_low: float
+    area_ratio_high: float
+    r2: float
+    rmse: float
+
+
+@dataclass
 class XRDResult:
     peak_002: PeakResult
     peak_100: PeakResult
     d002_nm: float
     lc_nm: float
     la_nm: float
+    double_002: Optional[DoublePeakResult] = None
 
 
 def pseudo_voigt(x: np.ndarray, amp: float, cen: float, fwhm: float, eta: float, bg0: float, bg1: float) -> np.ndarray:
@@ -34,6 +47,17 @@ def pseudo_voigt(x: np.ndarray, amp: float, cen: float, fwhm: float, eta: float,
     gaussian = np.exp(-((x - cen) ** 2) / (2 * sigma**2))
     lorentz = 1.0 / (1.0 + 4.0 * ((x - cen) / fwhm) ** 2)
     return amp * (eta * lorentz + (1 - eta) * gaussian) + bg0 + bg1 * x
+
+
+def _pure_pv(x: np.ndarray, amp: float, cen: float, fwhm: float, eta: float) -> np.ndarray:
+    sigma = fwhm / (2 * np.sqrt(2 * np.log(2)))
+    gaussian = np.exp(-((x - cen) ** 2) / (2 * sigma**2))
+    lorentz = 1.0 / (1.0 + 4.0 * ((x - cen) / fwhm) ** 2)
+    return amp * (eta * lorentz + (1 - eta) * gaussian)
+
+
+def _double_pv(x: np.ndarray, a1: float, c1: float, w1: float, e1: float, a2: float, c2: float, w2: float, e2: float, bg0: float, bg1: float) -> np.ndarray:
+    return _pure_pv(x, a1, c1, w1, e1) + _pure_pv(x, a2, c2, w2, e2) + bg0 + bg1 * x
 
 
 def _estimate_fwhm(x: np.ndarray, y: np.ndarray, center_idx: int) -> float:
@@ -78,6 +102,70 @@ def fit_peak(two_theta: np.ndarray, intensity: np.ndarray, fit_range: Tuple[floa
     rmse = float(np.sqrt(np.mean((y - y_fit) ** 2)))
 
     return PeakResult(two_theta=float(cen), fwhm_deg=float(abs(fwhm)), area=area, height=float(amp), r2=r2, rmse=rmse)
+
+
+def fit_double_peak(two_theta: np.ndarray, intensity: np.ndarray, fit_range: Tuple[float, float], lambda_nm: float = 0.15406) -> DoublePeakResult:
+    mask = (two_theta >= fit_range[0]) & (two_theta <= fit_range[1])
+    x = two_theta[mask]
+    y = intensity[mask]
+    if x.size < 15:
+        raise ValueError("双峰拟合区间数据点不足")
+
+    idx_sorted = np.argsort(y)[::-1]
+    i1 = int(idx_sorted[0])
+    i2 = int(next((i for i in idx_sorted[1:] if abs(i - i1) > max(3, int(0.06 * len(x)))), idx_sorted[min(1, len(idx_sorted)-1)]))
+    c1, c2 = float(x[i1]), float(x[i2])
+    if c1 > c2:
+        c1, c2 = c2, c1
+        i1, i2 = i2, i1
+
+    a1 = float(max(y[i1] - np.percentile(y, 20), 1e-3))
+    a2 = float(max(y[i2] - np.percentile(y, 20), 1e-3))
+    w1 = _estimate_fwhm(x, y, i1)
+    w2 = _estimate_fwhm(x, y, i2)
+
+    p0 = [a1, c1, w1, 0.5, a2, c2, w2, 0.5, float(np.min(y)), 0.0]
+    bounds = (
+        [0.0, fit_range[0], 0.05, 0.0, 0.0, fit_range[0], 0.05, 0.0, -np.inf, -np.inf],
+        [np.inf, fit_range[1], 12.0, 1.0, np.inf, fit_range[1], 12.0, 1.0, np.inf, np.inf],
+    )
+
+    popt, _ = curve_fit(_double_pv, x, y, p0=p0, bounds=bounds, maxfev=50000)
+    a1, c1, w1, e1, a2, c2, w2, e2, bg0, bg1 = popt
+
+    if c1 > c2:
+        a1, c1, w1, e1, a2, c2, w2, e2 = a2, c2, w2, e2, a1, c1, w1, e1
+
+    y_fit = _double_pv(x, *popt)
+    y_bg = bg0 + bg1 * x
+    y1 = _pure_pv(x, a1, c1, w1, e1)
+    y2 = _pure_pv(x, a2, c2, w2, e2)
+
+    area1 = float(np.trapz(y1, x))
+    area2 = float(np.trapz(y2, x))
+    area_sum = max(area1 + area2, 1e-12)
+
+    ss_res = float(np.sum((y - y_fit) ** 2))
+    ss_tot = float(np.sum((y - np.mean(y)) ** 2)) + 1e-12
+    r2 = 1.0 - ss_res / ss_tot
+    rmse = float(np.sqrt(np.mean((y - y_fit) ** 2)))
+
+    p_low = PeakResult(two_theta=float(c1), fwhm_deg=float(abs(w1)), area=area1, height=float(a1), r2=r2, rmse=rmse)
+    p_high = PeakResult(two_theta=float(c2), fwhm_deg=float(abs(w2)), area=area2, height=float(a2), r2=r2, rmse=rmse)
+
+    d_low = float(lambda_nm / (2 * np.sin(np.deg2rad(c1 / 2))))
+    d_high = float(lambda_nm / (2 * np.sin(np.deg2rad(c2 / 2))))
+
+    return DoublePeakResult(
+        peak_low=p_low,
+        peak_high=p_high,
+        d_low_nm=d_low,
+        d_high_nm=d_high,
+        area_ratio_low=area1 / area_sum,
+        area_ratio_high=area2 / area_sum,
+        r2=r2,
+        rmse=rmse,
+    )
 
 
 def _rolling_min_baseline(y: np.ndarray, window: int = 51) -> np.ndarray:
@@ -191,6 +279,7 @@ def analyze_hard_carbon_xrd(
     baseline_poly_degree: int = 2,
     asls_lam: float = 1e5,
     asls_p: float = 0.01,
+    enable_double_002: bool = False,
 ) -> XRDResult:
     y = preprocess_intensity(
         intensity,
@@ -212,4 +301,11 @@ def analyze_hard_carbon_xrd(
     lc_nm = scherrer_size_nm(lambda_nm, k_lc, theta002, p002.fwhm_deg, inst_fwhm_deg)
     la_nm = scherrer_size_nm(lambda_nm, k_la, p100.two_theta / 2.0, p100.fwhm_deg, inst_fwhm_deg)
 
-    return XRDResult(peak_002=p002, peak_100=p100, d002_nm=d002_nm, lc_nm=lc_nm, la_nm=la_nm)
+    dbl = None
+    if enable_double_002:
+        try:
+            dbl = fit_double_peak(two_theta, y, range_002, lambda_nm=lambda_nm)
+        except Exception:
+            dbl = None
+
+    return XRDResult(peak_002=p002, peak_100=p100, d002_nm=d002_nm, lc_nm=lc_nm, la_nm=la_nm, double_002=dbl)

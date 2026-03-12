@@ -59,6 +59,8 @@ with st.sidebar:
 Recommended flow: `percentile` → `rolling_min/poly` → `asls` if needed.
 """)
 
+    enable_double_002_global = st.checkbox("启用20-32°双峰分解（适合20多度双峰）", value=True)
+
 uploaded_files = st.file_uploader("上传文件（可多选）", type=["csv", "txt", "dat", "xlsx", "xls"], accept_multiple_files=True)
 
 if uploaded_files:
@@ -94,6 +96,7 @@ if uploaded_files:
 
             lmbd, klc, kla, ifwhm = lambda_nm, k_lc, k_la, inst_fwhm
             sm, sm_mode, bmode = smooth, smooth_mode, baseline_mode
+            enable_double_002 = enable_double_002_global
             sgw, sgp, maw = int(sg_window), int(sg_poly), int(ma_window)
             pdg, alam, ap = int(poly_deg), float(asls_lam), float(asls_p)
 
@@ -108,6 +111,7 @@ if uploaded_files:
                     sm = st.checkbox(f"平滑 [{up.name}]", value=sm, key=f"sm_{up.name}")
                     sm_mode = st.selectbox(f"平滑模式 [{up.name}]", ["savgol", "moving_average", "none"], index=["savgol","moving_average","none"].index(sm_mode), key=f"smm_{up.name}")
                     bmode = st.selectbox(f"背景模式 [{up.name}]", ["percentile", "rolling_min", "poly", "asls", "none"], index=["percentile","rolling_min","poly","asls","none"].index(bmode), key=f"bm_{up.name}")
+                    enable_double_002 = st.checkbox(f"双峰分解 [{up.name}]", value=enable_double_002, key=f"db_{up.name}")
 
             if mode == "一键快速自动分析":
                 range_002, range_100 = suggest_peak_ranges(tt_ana, preprocess_intensity(yy_ana, smooth=sm, window=sgw, polyorder=sgp, baseline_mode=bmode, smooth_mode=("none" if not sm else sm_mode), ma_window=maw, baseline_poly_degree=pdg, asls_lam=alam, asls_p=ap))
@@ -117,7 +121,7 @@ if uploaded_files:
                 range_002, range_100 = (float(s002[0]), float(s002[1])), (float(s100[0]), float(s100[1]))
 
             try:
-                res = analyze_hard_carbon_xrd(tt_ana, yy_ana, lambda_nm=lmbd, k_lc=klc, k_la=kla, inst_fwhm_deg=ifwhm, smooth=sm, range_002=range_002, range_100=range_100, baseline_mode=bmode, smooth_mode=("none" if not sm else sm_mode), ma_window=maw, baseline_poly_degree=pdg, asls_lam=alam, asls_p=ap)
+                res = analyze_hard_carbon_xrd(tt_ana, yy_ana, lambda_nm=lmbd, k_lc=klc, k_la=kla, inst_fwhm_deg=ifwhm, smooth=sm, range_002=range_002, range_100=range_100, baseline_mode=bmode, smooth_mode=("none" if not sm else sm_mode), ma_window=maw, baseline_poly_degree=pdg, asls_lam=alam, asls_p=ap, enable_double_002=enable_double_002)
             except Exception as e:
                 st.error(f"拟合失败: {e}")
                 continue
@@ -142,6 +146,16 @@ if uploaded_files:
                 "RMSE": [p002_rmse, p100_rmse],
             }), use_container_width=True)
 
+            if res.double_002 is not None:
+                st.markdown("#### 20–32° 双峰分解结果")
+                st.dataframe(pd.DataFrame({
+                    "Component": ["Low-angle peak", "High-angle peak"],
+                    "Center 2θ (°)": [res.double_002.peak_low.two_theta, res.double_002.peak_high.two_theta],
+                    "d (nm)": [res.double_002.d_low_nm, res.double_002.d_high_nm],
+                    "Area ratio": [res.double_002.area_ratio_low, res.double_002.area_ratio_high],
+                }), use_container_width=True)
+                st.caption("说明：低角峰通常对应更无序/更大层间距组分，高角峰对应相对有序组分。")
+
             y_proc = preprocess_intensity(yy_ana, smooth=sm, window=sgw, polyorder=sgp, baseline_mode=bmode, smooth_mode=("none" if not sm else sm_mode), ma_window=maw, baseline_poly_degree=pdg, asls_lam=alam, asls_p=ap)
             m_disp = (tt_ana >= x_range[0]) & (tt_ana <= x_range[1])
             fig, ax = plt.subplots(figsize=(10, 4.8))
@@ -163,6 +177,9 @@ if uploaded_files:
                 "R² (002)": p002_r2,
                 "R² (100)": p100_r2,
                 "X range (°2θ)": f"{x_range[0]:.1f}-{x_range[1]:.1f}",
+                "Double peak fitted": bool(res.double_002 is not None),
+                "d_low (nm)": (res.double_002.d_low_nm if res.double_002 is not None else float("nan")),
+                "d_high (nm)": (res.double_002.d_high_nm if res.double_002 is not None else float("nan")),
             })
 
     if rows:
